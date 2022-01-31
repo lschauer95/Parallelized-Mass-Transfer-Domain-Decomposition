@@ -1,0 +1,30 @@
+# fortran compiler
+FC90 = gfortran
+MPI90 = mpif90
+#FC90 = ifort
+#MPI90 = mpifort
+
+
+# optimization level
+FLAGS = -O3
+
+# for debugging
+#FLAGS = -g -fcheck=all -fbacktrace -Og
+
+# generate warnings and direct to compile.log
+WARN = -Wall  #> compile.log 2>&1
+
+# add WARN to FLAGS
+# FLAGS += $(WARN)
+
+mpiDDC_files = tiling3D.f90
+
+executable = tiling3D_exe
+
+all: $(executable)
+
+$(executable): $(mpiDDC_files)
+	$(MPI90) $(mpiDDC_files) -o $@ $(FLAGS)
+
+clean:
+	rm -r *_exe *.mod *.o *.out *.err dolomite_chem.in myrun* *.dSYM *.inp compile.log locs.txt mass.txt

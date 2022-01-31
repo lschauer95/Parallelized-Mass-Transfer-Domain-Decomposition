@@ -1,0 +1,7 @@
+All files in this folder can be used to generate all 2-d results for the paper--including make files for both the main simulation and the tiling program (if the user chooses to utilize the tiling suggestions).  
+
+If the user wishes to get a guidelines of number of processors to use, they may input their simulation parameters into tiling2D.f90 to receive a suggested number of cores along with how to tile the domain. 
+
+This information will need to be updated in lines 119 and 120 in the code before a job is submitted. It is imperative that (nnx * nny) is equal to the number of processors with which the user submits a job. 
+
+A make file is provided to create an executable using the corresponding files, and the user may submit the job however they wish. 
