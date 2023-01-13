@@ -1,5 +1,5 @@
-program DDC_2D_mpi
-use mod_DDC_2D_mpi
+program DDC_2D_mpi_paper
+use mod_DDC_2D_mpi_paper
 implicit none
 
 ! ==============================================================================
@@ -15,18 +15,20 @@ real(pDki), parameter :: kappa_RW  = 0.5_pDki ! amount of diffusion to be simula
 real(pDki), parameter :: DRW       = kappa_RW * D0 ! diffusion coefficient for the random walks
 real(pDki), parameter :: DMT       = (1.0_pDki - kappa_RW) * D0 ! amount of diffusion to be simulated by mass transfers
 real(pDki), parameter :: beta      = 1 ! beta parameter, encoding the bandwidth of the mass transfer kernel
-real(pDki), parameter :: maxtime   = 10.0e0_pDki ! simulation end time (used for RMSE calculation)
-real(pDki), parameter :: cut_const = 3.0_pDki ! multiplier for cutdist
-real(pDki), parameter :: pad_const = 3.0_pDki ! multiplier for paddist
+real(pDki), parameter :: maxtime   = 1e1_pDki ! simulation end time (used for RMSE calculation)
+real(pDki), parameter :: cut_const = 6.0_pDki ! multiplier for cutdist
+real(pDki), parameter :: pad_const = 6.0_pDki ! multiplier for paddist
 integer,    parameter :: Num_DDCMT = 1 ! corresponds to the 2 mass transfer schemes (i.e., SPaM = 1, PLSS = 2)
 integer,    parameter :: DDC_WhichWay = 2 ! corresponds to the 2 decomposition schemes (i.e., Vertical Slices = 1, Checkerboard = 2)
 integer,    parameter :: Np                = 10e6 ! number of particles in the simulation
-real(pDki), parameter :: dt                = 1e-1_pDki ! time step size 
+real(pDki), parameter :: dt                = 1e-1_pDki ! time step size
+! real(pDki)            :: dt ! time step size 
+
 
 ! ==============================================================================
 !                             GENERAL VARIABLES
 ! ==============================================================================
-
+! integer(kind=8)                 :: random
 integer                         :: i, Np_idx, ens, tstep, DDC_MTflag ! loop iterators
 integer                         :: errcode, ierr ! error codes
 real(pDki)                      :: time ! time step
@@ -43,9 +45,13 @@ real(pDki)                      :: Dlims(4) ! subdomain boundary limits
 real(pDki)                      :: tic, toc ! timer variables for tracking run time
 real(pDki)                      :: error, totError ! RMSE at final time (core local, and total)
 real(pDki),         allocatable :: analytical(:) !analytical solution array
+real(pDki),         allocatable :: errvec(:) ! vector for error calculation
 real(pDki)                      :: dx, dy, width, height, minDTcheck ! horizontal/vertical grid spacing
 real(pDki)                      :: cutdist ! number of standard deviations for kD search
 real(pDki)                      :: paddist ! number of standard deviations for subdomain pad
+real(pDki),           parameter :: desiredeff = 0.75_pDki ! how efficient the user wants to be
+real(pDki)                      :: eff ! how efficient the user can expect to be
+real(pDki)                      :: proc ! suggested number of processors
 
 real(pDki)                      :: ds, factor, denom, spillX, spillY ! these are used for co-location probability calculations
 integer,            allocatable :: idx(:), idxActive(:) ! these are used to get the indices of active particles and idxActive is used as an argument to the particle array
@@ -120,6 +126,8 @@ call build_derived_pType(mpi_pType)
 ! ============================== Wake up the CPU ===============================
 if (my_rank == master) then
     print *, 'Wait a moment, this will make the CPU work out a bit first...'
+    ! Write(*,*) "Size of random is",huge(random)
+    ! Write(*,*) "Size of int(Np,8) is",huge(int(Np,8))
     write (*, *)
 endif
 
@@ -137,8 +145,8 @@ select case (DDC_WhichWay)
 
         ! INPUT SIMULATION PARAMETERS INTO TILING2D.F90 TO GET TILING SUGGESTIONS TO PUT HERE
         ! Remember the nny*nnx must equal the number of cores with which you submit the slurm job
-        nny = 20
-        nnx = 20
+        nny = 1
+        nnx = 1
 
     case default
         print *, '**** ERROR: Invalid transfer mode ****'
@@ -152,7 +160,8 @@ dy = (ytoplim-ybottomlim)/real(nny,pDki)
 
 height = ytoplim - ybottomlim
 width  = xrightlim - xleftlim
-minDTcheck = beta*(width*height)/(2.0_pDki*D0*Np**2)
+minDTcheck = beta*(width*height)/(2.0_pDki*D0*real(Np,pDki))
+! dt = beta*(width*height)/(2.0_pDki*D0*real(Np,pDki))
 
 
 if (my_rank == master) then
@@ -163,6 +172,8 @@ if (my_rank == master) then
     else
         Write(*,*) "This is the checkerboard DDC method."
         Write(*,*) "minDT cutoff is",minDTcheck
+        Write(*,*) "dt for this simulation is",dt
+        Write(*,*) "Total simulation time is",maxtime
     endif
 
     if (dt >= minDTcheck) then
@@ -275,11 +286,15 @@ endif
 
 
     ! number of time steps
-    Nsteps    = maxtime/dt
+    Nsteps    = maxtime/real(dt,pDki)
 
     ! search distance for MT algorithm (\psi in manuscript)
-    cutdist   = cut_const * sqrt(4.0_pDki * D0 * dt)
-    paddist   = pad_const * sqrt(4.0_pDki * D0 * dt)
+    cutdist   = cut_const * sqrt(2.0_pDki * DMT * dt)
+    paddist   = pad_const * sqrt(2.0_pDki * DMT * dt)
+    
+    eff = num_cores**(-1.0_pDki)*((sqrt(real(num_cores,pDki))**(-1.0_pDki)+(2.0_pDki*cutdist)/width))**(-2.0_pDki)
+    proc = (desiredeff)**(-1.0_pDki)*(((1.0_pDki-sqrt(desiredeff))*width)/(2.0_pDki*cutdist))**(2.0_pDki)
+    
 
     ! these are for the co-location probability calculations
         ! while ds and factor are not strictly necessary, they are included to
@@ -310,10 +325,12 @@ endif
              if (my_rank == master) then
 
                 Write(*,*) "Setup time is",toc-tic
+                Write(*,*) "The user can expect to be",eff,"percent efficient with these simulation parameters."
+                Write(*,*) "To remain",desiredeff,"efficient, we suggest not using more than",proc,"processors."
 
              !    ! If you want to see where the spill is located
-             !    ! Write(*,*) "spillX is",spillX
-             !    ! Write(*,*) "spillY is",spillY
+                !   Write(*,*) "spillX is",spillX
+                !   Write(*,*) "spillY is",spillY
 
              endif
 
@@ -328,47 +345,49 @@ endif
 
             !! get indices of the currently active particles
 
-            ! if (my_rank == master) then
-            !     allocate(masterP(1 : Np))
-            ! endif
+            !  if (my_rank == master) then
+            !      allocate(masterP(1 : Np))
+            !      masterP(1 : coreNp) = p(1 : coreNp)
+            !  endif
 
             ! idxActive = 0
             ! Nactive = count(p%active)
             ! idxActive(1 : Nactive) = pack(idx, p%active)
 
-            !        begin = Nactive + 1
-            !        do i = 1, num_cores - 1
+            !         begin = Nactive + 1
+            !         do i = 1, num_cores - 1
 
-            !            if (my_rank == i) then
-            !                call mpi_send(Nactive, 1, mpi_integer, master, tag, mpi_comm_world, ierror)
-            !            endif
-            !            if (my_rank == master) then
-            !                call mpi_recv(num, 1, mpi_integer, i, tag, mpi_comm_world, status, ierror)
-            !            endif
-            !            if (my_rank == i) then
-            !                call mpi_send(p(idxActive(1 : Nactive)), Nactive, mpi_pType, master, tag, mpi_comm_world, ierror)
-            !            endif
-            !            if (my_rank == master) then
-            !                call mpi_recv(masterP(begin : begin + num - 1), num, mpi_pType,&
-            !                              i, tag, mpi_comm_world, status, ierror)
-            !            endif
+            !             if (my_rank == i) then
+            !                 call mpi_send(Nactive, 1, mpi_integer, master, tag, mpi_comm_world, ierror)
+            !             endif
+            !             if (my_rank == master) then
+            !                 call mpi_recv(num, 1, mpi_integer, i, tag, mpi_comm_world, status, ierror)
+            !             endif
+            !             if (my_rank == i) then
+            !                 call mpi_send(p(idxActive(1 : Nactive)), Nactive, mpi_pType, master, tag, mpi_comm_world, ierror)
+            !             endif
+            !             if (my_rank == master) then
+            !                 call mpi_recv(masterP(begin : begin + num - 1), num, mpi_pType,&
+            !                               i, tag, mpi_comm_world, status, ierror)
+            !             endif
             !           begin = begin + num
 
-            !        enddo
+            !         enddo
 
-            !        if (my_rank == master) then
+            !         if (my_rank == master) then
 
-            !                 call write_plot( uLocX,  locXName,  masterP%loc(1), .true.)
-            !                 call write_plot( uLocY,  locYName,  masterP%loc(2), .true.)
-            !                 call write_plot( uMass, massName, masterP%mass, .true.)
+            !                  call write_plot( uLocX,  locXName,  masterP%loc(1), .true.)
+            !                  call write_plot( uLocY,  locYName,  masterP%loc(2), .true.)
+            !                  call write_plot( uMass, massName, masterP%mass, .true.)
+            !                 Write(*,*) "Total mass at initial write is",sum(masterP%mass)
 
-            !                 Write(*,*) "After initial write"
+            !                 ! Write(*,*) "After initial write"
 
-            !        endif
+            !         endif
 
-            ! if (my_rank == master) then
-            !     deallocate(masterP)
-            ! endif
+            !  if (my_rank == master) then
+            !      deallocate(masterP)
+            !  endif
 
              ! ==================================================================
              ! ==================================================================
@@ -376,13 +395,22 @@ endif
 
             ! start the clock for recording run time
             tic = mpi_wtime()
+            
+            if(my_rank == master) then
+                ! Write (*,*) "cutdist is",cutdist
+                ! Write (*,*) "Nactive is",Nactive
+                Write (*,*) "Nsteps is",Nsteps
+            endif
+            
 
             do tstep = 1, Nsteps ! time stepping loop
 
                 ! print time step if you want to track real-time progress
-                ! if (my_rank == master) then
-                !     Write(*,*) "tstep is",tstep
-                ! endif
+                if (my_rank == master) then
+                    ! if (mod(tstep,10) == 0) then
+                        Write(*,*) "tstep is",tstep
+                    ! endif
+                endif
 
                 ! get indices of the currently active particles
                 idxActive = 0
@@ -445,57 +473,58 @@ endif
 
                 ! send all the particles to master for plotting write-out
 
-               ! if (tstep == 10 .or. tstep == 30 .or. tstep == 50 .or. tstep == 70 .or. tstep == 90) then
-               !!  if (tstep == Nsteps) then
+            !     if (mod(tstep,20) == 0) then
+            !   !  if (tstep == Nsteps) then
 
-               !     if (my_rank == master) then
-               !      allocate(masterP(1 : Np))
-               !     endif
+            !         if (my_rank == master) then
+            !          allocate(masterP(1 : Np))
+            !         endif
 
-               !     idxActive = 0
-               !     Nactive = count(p%active)
-               !     idxActive(1 : Nactive) = pack(idx, p%active)
+            !         idxActive = 0
+            !         Nactive = count(p%active)
+            !         idxActive(1 : Nactive) = pack(idx, p%active)
 
 
-               !      if (my_rank == master) then
-               !          masterP(1 : Nactive) = p(idxActive(1 : Nactive))
-               !      endif
-               !      !===============================================================
+            !          if (my_rank == master) then
+            !              masterP(1 : Nactive) = p(idxActive(1 : Nactive))
+            !          endif
+            !          !===============================================================
 
-               !     begin = Nactive + 1
-               !     do i = 1, num_cores - 1
+            !         begin = Nactive + 1
+            !         do i = 1, num_cores - 1
 
-               !         if (my_rank == i) then
-               !             call mpi_send(Nactive, 1, mpi_integer, master, tag, mpi_comm_world, ierror)
-               !         endif
-               !         if (my_rank == master) then
-               !             call mpi_recv(num, 1, mpi_integer, i, tag, mpi_comm_world, status, ierror)
-               !         endif
-               !         if (my_rank == i) then
-               !             call mpi_send(p(idxActive(1 : Nactive)), Nactive, mpi_pType, master, tag, mpi_comm_world, ierror)
-               !         endif
-               !         if (my_rank == master) then
-               !             call mpi_recv(masterP(begin : begin + num - 1), num, mpi_pType,&
-               !                           i, tag, mpi_comm_world, status, ierror)
-               !         endif
-               !        begin = begin + num
+            !             if (my_rank == i) then
+            !                 call mpi_send(Nactive, 1, mpi_integer, master, tag, mpi_comm_world, ierror)
+            !             endif
+            !             if (my_rank == master) then
+            !                 call mpi_recv(num, 1, mpi_integer, i, tag, mpi_comm_world, status, ierror)
+            !             endif
+            !             if (my_rank == i) then
+            !                 call mpi_send(p(idxActive(1 : Nactive)), Nactive, mpi_pType, master, tag, mpi_comm_world, ierror)
+            !             endif
+            !             if (my_rank == master) then
+            !                 call mpi_recv(masterP(begin : begin + num - 1), num, mpi_pType,&
+            !                               i, tag, mpi_comm_world, status, ierror)
+            !             endif
+            !           begin = begin + num
 
-               !     enddo
+            !         enddo
 
-               !     if (my_rank == master) then
+            !         if (my_rank == master) then
 
-               !              call write_plot( uLocX,  locXName,  masterP%loc(1), .false.)
-               !              call write_plot( uLocY,  locYName,  masterP%loc(2), .false.)
-               !              call write_plot( uMass, massName, masterP%mass, .false.)
-               !              Write(*,*) "Done with write at time step",tstep
+            !                  call write_plot( uLocX,  locXName,  masterP%loc(1), .false.)
+            !                  call write_plot( uLocY,  locYName,  masterP%loc(2), .false.)
+            !                  call write_plot( uMass, massName, masterP%mass, .false.)
+            !                 !  Write(*,*) "Done with write at time step",tstep
+            !                  Write(*,*) "Total mass at time step",tstep,"is",sum(masterP%mass)
 
-               !     endif
+            !         endif
 
-               !     if (my_rank == master .and. tstep /= Nsteps) then
-               !          deallocate(masterP)
-               !     endif
+            !         if (my_rank == master .and. tstep /= Nsteps) then
+            !              deallocate(masterP)
+            !         endif
 
-               ! endif
+            !     endif
                  
                 ! ==============================================================
                 ! ==============================================================
@@ -540,11 +569,12 @@ endif
 
 
             ! should be equal to maxtime, unless mod(maxtime,dt) is not an integer
-            time = Nsteps * dt
+            time = real(Nsteps,pDki) * dt
 
             if (my_rank == master) then
-                Write(*,*) "Total simulation time is",time
-                Write(*,*) "dt for this simulation is",dt
+                ! Write(*,*) "Total simulation time is",time
+                ! Write(*,*) "dt for this simulation is",dt
+                allocate(errvec(1:num_cores))
             endif
 
             ! determine active particles for error calculation
@@ -559,20 +589,40 @@ endif
 
 
             ! Heaviside analytic solution
-            analytical = 0.5_pDki * erfc(-(p(idxActive(1 : Nactive))%loc(1) - xmidpt)/sqrt(4.0_pDki * D0 * time))
+            ! analytical = 0.5_pDki * erfc(-(p(idxActive(1 : Nactive))%loc(1) - xmidpt)/sqrt(4.0_pDki * D0 * time))
 
 
             ! Delta function analytic solution for a single spill 
-            ! analytical = exp(-1.0_pDki*((p(idxActive(1 : Nactive))%loc(1)-spillX)**2+&
-            !     (p(idxActive(1 : Nactive))%loc(2)-spillY)**2)/(4.0_pDki*D0*time))/(4.0_pDki*pi*D0*time)
+            analytical = exp(-1.0_pDki*((p(idxActive(1 : Nactive))%loc(1)-spillX)**2+&
+                (p(idxActive(1 : Nactive))%loc(2)-spillY)**2)/(4.0_pDki*D0*time))/(4.0_pDki*pi*D0*time)
+                
+            analytical = analytical/sum(analytical)
 
 
             ! local "MSEs"
-            error = sum((analytical-p(idxActive(1 : Nactive))%mass)**2)/real(Np,pDki)
+            error = sum((analytical-p(idxActive(1 : Nactive))%mass)**2)
+            
+            ! Write(*,*) "The error on rank",my_rank,"is",error
+
+            if(my_rank == master) then
+                errvec(1) = error
+            endif
+            
+            do i = 1, num_cores-1
+            
+                if (my_rank == i) then
+                        call mpi_send(error, 1, mpi_double_precision, master, tag, mpi_comm_world, ierror)
+                endif
+                
+                if (my_rank == master) then
+                        call mpi_recv(errvec(i+1), 1, mpi_double_precision, i, tag, mpi_comm_world, status, ierror)
+                endif
+            
+            enddo
 
 
             ! sum all the individual core's "MSEs" on lead core
-            call mpi_reduce(error, totError, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierror)
+            ! call mpi_reduce(error, totError, 1, mpi_double_precision, mpi_sum, 0, mpi_comm_world, ierror)
 
 
 
@@ -580,12 +630,13 @@ endif
 
                 ! Write(*,*) "global error sum before square root is",totError
 
-                totError = sqrt(totError)
-                ! totError = sqrt(error)
+                ! totError = sqrt(totError)
+                
+                totError = sqrt(sum(errvec)/real(Np,pDki))
 
                 ! print the error to screen
-                print *,'totError = ',totError
-                print *,'================================'
+                ! print *,'totError = ',totError
+                ! print *,'================================'
 
                 ! write the error and dt information to file if desired
 
@@ -604,4 +655,4 @@ endif
 
 call mpi_finalize(ierror)
 
-end program DDC_2D_mpi
+end program DDC_2D_mpi_paper

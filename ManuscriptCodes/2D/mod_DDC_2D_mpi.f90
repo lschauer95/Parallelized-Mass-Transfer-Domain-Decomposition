@@ -1,4 +1,4 @@
-module mod_DDC_2D_mpi
+module mod_DDC_2D_mpi_paper
 use mpi
 use kdtree2_module
 implicit none
@@ -46,9 +46,9 @@ end type ParticleType
 
 ! sparse matrix type in coordinate format
 type SparseMatType
-    integer    :: row
-    integer    :: col
-    real(pDki) :: val
+    integer(kind=8)    :: row
+    integer(kind=8)    :: col
+    real(pDki)         :: val
 end type SparseMatType
 
 ! holds the results of the kD tree fixed radius search
@@ -474,7 +474,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
     ! first send particles to the left (up left and down left too)
     if (my_rank > (nny - 1)) then
 
-        allocate(tmp_pLeft(Nactive/5),tmp_pDL(Nactive/10),tmp_pUL(Nactive/10))
+        allocate(tmp_pLeft(Nactive),tmp_pDL(Nactive/2),tmp_pUL(Nactive/2))
 
         ! if it is outside of the lower boundary, tag it to be sent to the left
         where (p(active)%loc(1) < Dlims(1) .and. p(active)%loc(2) > Dlims(3) .and. p(active)%loc(2) < Dlims(4))
@@ -597,7 +597,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
     ! if there are > 0 particles to be received, receive them
     if (my_rank < num_cores - nny .and. recvSizeRight > 0) then
-        allocate(recv_pRight(Nactive/5))
+        allocate(recv_pRight(Nactive))
         call mpi_recv(recv_pRight(1 : recvSizeRight), recvSizeRight, mpi_pType,&
                       my_rank + nny, tag + my_rank, mpi_comm_world, status, ierror)
     endif
@@ -607,7 +607,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
     ! not commented)
     if (my_rank < num_cores - nny) then
 
-        allocate(tmp_pRight(Nactive/5),tmp_pUR(Nactive/10),tmp_pDR(Nactive/10))
+        allocate(tmp_pRight(Nactive),tmp_pUR(Nactive/2),tmp_pDR(Nactive/2))
 
         where (p(active)%loc(1) > Dlims(2) .and. p(active)%loc(2) < Dlims(4) .and. p(active)%loc(2) > Dlims(3))
             p(active)%jumped(2) = .true.
@@ -716,7 +716,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         if (mod(my_rank,nny) > 0) then
 
-            allocate(tmp_pDown(Nactive/3))
+            allocate(tmp_pDown(Nactive))
 
             where (p(active)%loc(2) < Dlims(3) .and. p(active)%loc(1) > Dlims(1) .and. p(active)%loc(1) < Dlims(2))
                 p(active)%jumped(3) = .true.
@@ -792,7 +792,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         !recv array from above
         if (mod(my_rank,nny) /= (nny - 1) .and. recvSizeUp > 0) then
-            allocate(recv_pUp(Nactive/5))
+            allocate(recv_pUp(Nactive))
             call mpi_recv(recv_pUp(1 : recvSizeUp), recvSizeUp, mpi_pType,&
                           my_rank + 1, tag + my_rank, mpi_comm_world, status, ierror)
         endif
@@ -806,7 +806,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         !recv array from UL
         if (mod(my_rank,nny) /= (nny-1) .and. my_rank > (nny - 1) .and. recvSizeUL > 0) then
-            allocate(recv_pUL(Nactive/10))
+            allocate(recv_pUL(Nactive/2))
             call mpi_recv(recv_pUL(1 : recvSizeUL), recvSizeUL, mpi_pType,&
                           my_rank - nny + 1, tag + my_rank, mpi_comm_world, status, ierror)
         endif
@@ -820,7 +820,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         !recv array UR
         if (mod(my_rank,nny) /= (nny-1) .and. my_rank < (num_cores - nny) .and. recvSizeUR > 0) then
-            allocate(recv_pUR(Nactive/10))
+            allocate(recv_pUR(Nactive/2))
             call mpi_recv(recv_pUR(1 : recvSizeUR), recvSizeUR, mpi_pType,&
                           my_rank + nny + 1, tag + my_rank, mpi_comm_world, status, ierror)
         endif
@@ -830,7 +830,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         if (mod(my_rank,nny) /= (nny - 1)) then
 
-            allocate(tmp_pUp(Nactive/5))
+            allocate(tmp_pUp(Nactive))
 
             where (p(active)%loc(2) > Dlims(4) .and. p(active)%loc(1) > Dlims(1) .and. p(active)%loc(1) < Dlims(2))
                 p(active)%jumped(4) = .true.
@@ -887,7 +887,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         !recv array from below
         if (mod(my_rank,nny) /= 0 .and. recvSizeDown > 0) then
-            allocate(recv_pDown(Nactive/5))
+            allocate(recv_pDown(Nactive))
             call mpi_recv(recv_pDown(1 : recvSizeDown), recvSizeDown, mpi_pType,&
                           my_rank - 1, tag + my_rank, mpi_comm_world, status, ierror)
         endif
@@ -913,7 +913,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         !recv array DL
         if (mod(my_rank,nny) /= 0 .and. my_rank > (nny - 1) .and. recvSizeDL > 0) then
-            allocate(recv_pDL(Nactive/10))
+            allocate(recv_pDL(Nactive/2))
             call mpi_recv(recv_pDL(1 : recvSizeDL), recvSizeDL, mpi_pType,&
                           my_rank - nny - 1, tag + my_rank, mpi_comm_world, status, ierror)
         endif
@@ -927,7 +927,7 @@ subroutine swapDomains(pVecSize, Nactive, idxActive, Dlims, paddist, p, nnx, nny
 
         !recv array DR
         if (mod(my_rank,nny) /= 0 .and. my_rank < (num_cores - nny) .and. recvSizeDR > 0) then
-            allocate(recv_pDR(Nactive/10))
+            allocate(recv_pDR(Nactive/2))
             call mpi_recv(recv_pDR(1 : recvSizeDR), recvSizeDR, mpi_pType,&
                           my_rank + nny - 1, tag + my_rank, mpi_comm_world, status, ierror)
         endif
@@ -1150,7 +1150,7 @@ end subroutine write_error
 subroutine SP_matVecMult(A, x, n, y)
     type(SparseMatType), intent(in   ) :: A(:)
     real(pDki),          intent(in   ) :: x(:)
-    integer,             intent(in   ) :: n ! number of entries in A
+    integer(kind=8),     intent(in   ) :: n ! number of entries in A
     real(pDki),          intent(  out) :: y(:)
     integer                            :: i
 
@@ -1172,32 +1172,25 @@ subroutine massTrans_kDMat(n, idxActive, cutdist, denom, p, beta)
    ! bandwidth of the mass-transfer kernel
     ! ========================== LOCAL VARIABLES ===============================
     type(SparseMatType), allocatable :: Emat(:) ! mass transfer matrix
-    integer                          :: start(n), finish(n), Nclose ! used for building the mass transfer matrix
+    integer(kind=8)                  :: start(n), finish(n)
+    integer(kind=8)                  :: Nclose ! used for building the mass transfer matrix
     real(pDki)                       :: tmpmass(n) ! temporary array for holding particle masses
-    Type(ParticleType)               :: tmp_p(n) ! temporary particle array for dealing with ghost particles
+    type(ParticleType)               :: tmp_p(n) ! temporary particle array for dealing with ghost particles
     integer                          :: idx(n) ! indexing array
     integer                          :: i
     integer                          :: nNotGhost, idxNotGhost(n), idxNotGhostTmp(n) ! indexing array for non-ghost particles
     logical                          :: logNotGhost(n) ! logical array for non-ghost particles
 
     tmp_p = p(idxActive(1 : n))
-    
-!    Write(*,*) "Before DistmatSparse"
 
     ! build the pairwise distance matrix
     call build_DistmatSparse(n, cutdist, tmp_p, Emat, start, finish, Nclose)
 
-
-
-!    Write(*,*) "After DistmasSparse.. Before PmatSparse"
     ! build the matrix of co-location probabilities
     call build_PmatSparse(n, denom, start, finish, Emat)
 
-!    Write(*,*) "After PmatSparse.. Before EmatSparse"
     ! build the mass transfer matrix
     call build_EmatSparse(n, Nclose, Emat, beta)
-
-!    Write(*,*) "After EmatSparse"
 
     tmpmass = tmp_p%mass
 
@@ -1320,42 +1313,35 @@ subroutine build_DistmatSparse(n, cutdist, p, Distmat, start, finish, Nclose)
     real(pDki),                       intent(in   ) :: cutdist ! cutoff distance for the kD tree fixed-radius search
     type(ParticleType),               intent(in   ) :: p(:) ! particle array
     type(SparseMatType), allocatable, intent(  out) :: Distmat(:) ! sparse distance matrix
-    integer,                          intent(  out) :: start(n), finish(n) ! indices (in the Distmat vectors) for the start and finish of each column of Distmat
-    integer,                          intent(  out) :: Nclose ! total number of neighbor particles found by the kD search (i.e, the length of the vectors in Distmat)
+    integer(kind=8),                  intent(  out) :: start(n), finish(n) ! indices (in the Distmat vectors) for the start and finish of each column of Distmat
+    integer(kind=8),                  intent(  out) :: Nclose ! total number of neighbor particles found by the kD search (i.e, the length of the vectors in Distmat)
 
     ! ========================== LOCAL VARIABLES ===============================
     type(kDRS_ResultType), allocatable :: neighbors(:) ! holds the results of the kD tree fixed radius search
     integer                            :: i ! loop iterator
-    integer                            :: tmpstart ! temporary variable to handle the n+1^th calculation of start in the loop
+    integer(kind=8)                    :: tmpstart ! temporary variable to handle the n+1^th calculation of start in the loop
 
     ! conduct the kD tree fixed-radius search
     ! NOTE: this returns squared distances between particles
-!    Write(*,*) "Before f-r search"
+
     call fixedRadSearch(n, cutdist, p, neighbors)
-   ! Write(*,*) "After f-r search"
 
     ! allocate Distmat to have length = total number of neighbors found by the kD search
-    Nclose = sum(neighbors%num)
-    ! Write(*,*) "Rank",my_rank,"before allocation of Nclose =",Nclose
+    Nclose = sum(int(neighbors%num,8))
+    
     allocate(Distmat(Nclose))
 
-!    Write(*,*) "Before Distmat loop and n=",n
-!    Write(*,*) "Before Distmat loop and Nclose=",Nclose
     ! fill in Distmat
     tmpstart = 1
     do i = 1, n
         start(i) = tmpstart
-        finish(i) = start(i) - 1 + neighbors(i)%num
-!        Write(*,*) "start = ",start(i)
-!        Write(*,*) "neighbors%num = ", neighbors(i)%num
-!        Write(*,*) "finish = ", finish(i)
+        finish(i) = start(i) - 1 + int(neighbors(i)%num,8)
         Distmat(start(i) : finish(i))%col = i
         Distmat(start(i) : finish(i))%row = neighbors(i)%idx
         Distmat(start(i) : finish(i))%val = real(neighbors(i)%rad, pDki)
         tmpstart = finish(i) + 1
     enddo
     
-!    Write(*,*) "After Distmat loop"
     deallocate (neighbors)
 end subroutine build_DistmatSparse
 
@@ -1396,7 +1382,7 @@ end subroutine fixedRadSearch
 subroutine build_PmatSparse(n, denom, start, finish, Pmat)
     integer,             intent(in   ) :: n ! number of entries in the matrix
     real(pDki),          intent(in   ) :: denom ! denominator of the exponential in the co-location probability density
-    integer,             intent(in   ) :: start(n), finish(n) ! indices (in the Distmat vectors) for the start and finish of each column of Distmat
+    integer(kind=8),     intent(in   ) :: start(n), finish(n) ! indices (in the Distmat vectors) for the start and finish of each column of Distmat
     type(SparseMatType), intent(inout) :: Pmat(:) ! sparse matrix of co-location probabilities
 
     ! ========================== LOCAL VARIABLES ===============================
@@ -1420,13 +1406,13 @@ end subroutine build_PmatSparse
 !           = \vec I - beta * diag(rowsum(\vec Pmat)) + beta * \vec Pmat
 subroutine build_EmatSparse(n, Nclose, Emat, beta)
     integer,             intent(in   ) :: n ! total number of particles
-    integer,             intent(in   ) :: Nclose ! total number of neighbor particles found by the kD search (i.e, the length of the vectors in Distmat)
+    integer(kind=8),     intent(in   ) :: Nclose ! total number of neighbor particles found by the kD search (i.e, the length of the vectors in Distmat)
     type(SparseMatType), intent(inout) :: Emat(:) ! sparse mass-transfer matrix
     real(pDki),          intent(in   ) :: beta ! beta parameter
     ! ========================== LOCAL VARIABLES ===============================
-    integer    :: i, j
-    integer    :: diag(n) ! linear indices of the diagonal elements of Pmat
-    real(pDki) :: rowsum(n), colsum(n) ! arrays holding the row/col sums of Pmat
+    integer(kind=8)    :: i, j
+    integer(kind=8)    :: diag(n) ! linear indices of the diagonal elements of Pmat
+    real(pDki)         :: rowsum(n), colsum(n) ! arrays holding the row/col sums of Pmat
 
     ! compute the rowsums of Pmat
     rowsum = 0.0_pDki
@@ -1556,7 +1542,7 @@ subroutine InitialSpacingAndIC(p, Dlims, coreNp, xmidpt, ymidpt, nnx, nny, spill
             ! point source initial condition near center
 
             ! if (my_rank == (floor(nnx/real(2,pDki))*nny + floor(nny/real(2,pDki)))) then
-            !     p(1)%mass = 1.0_pDki
+            !     p(coreNp/2)%mass = 1.0_pDki
             ! endif
 
             ! if (any(p(1 : coreNp)%mass == 1.0_pDki) .eqv. .true.) then
@@ -1564,8 +1550,8 @@ subroutine InitialSpacingAndIC(p, Dlims, coreNp, xmidpt, ymidpt, nnx, nny, spill
             ! endif
 
             ! if (any(p(1 : coreNp)%mass == 1.0_pDki) .eqv. .true.) then
-            !     spillX = p(1)%loc(1)
-            !     spillY = p(1)%loc(2)
+            !     spillX = p(coreNp/2)%loc(1)
+            !     spillY = p(coreNp/2)%loc(2)
             ! endif       
 
 
@@ -1801,4 +1787,4 @@ end subroutine InitialSpacingAndIC
 
 
 
-end module mod_DDC_2D_mpi
+end module mod_DDC_2D_mpi_paper
