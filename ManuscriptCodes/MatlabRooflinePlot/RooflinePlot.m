@@ -1,6 +1,7 @@
  % Roofline Figure
 [figSettings, color, rgbcmy, mList, lineList, dashList, subplot_pos] = setFigureDefaultsNew();
 
+% for a serial benchmark on the hardware
 peakflops = 5546.22;
 peakmem = 2773.11;
 
